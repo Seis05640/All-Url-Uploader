@@ -13,6 +13,7 @@ from config import Settings
 from services.progress import format_download_progress
 from utils.logging_config import safe_url_label
 from utils.models import DownloadArtifact, DownloadOption, ParsedInput
+from utils.security import sanitize_filename, validate_url
 
 
 logger = logging.getLogger(__name__)
@@ -49,9 +50,17 @@ async def download_direct_file(
     suggested_ext: str | None = None,
 ) -> DownloadArtifact:
     work_dir.mkdir(parents=True, exist_ok=True)
+    
+    # SSRF protection
+    is_valid, error_msg = validate_url(parsed_input.source_url)
+    if not is_valid:
+        raise ValueError(f"URL validation failed: {error_msg}")
+    
     file_name = parsed_input.custom_file_name or _filename_from_url(
         parsed_input.source_url
     )
+    # Sanitize filename to prevent path traversal
+    file_name = sanitize_filename(file_name)
     logger.info(
         "Direct download starting | source=%s send_type=%s work_dir=%s",
         safe_url_label(parsed_input.source_url),
@@ -60,9 +69,12 @@ async def download_direct_file(
     )
 
     timeout = aiohttp.ClientTimeout(total=settings.process_max_timeout)
-    connector = None
+    # Fix SSL verification - don't disable by default
+    connector = aiohttp.TCPConnector(ssl=True)
     if settings.http_proxy:
-        connector = aiohttp.TCPConnector(ssl=False)
+        # Only disable SSL verification if explicitly configured (not recommended)
+        connector = aiohttp.TCPConnector(ssl=True)  # Keep SSL verification even with proxy
+        # If proxy requires SSL bypass, configure separately with explicit setting
 
     auth = None
     if parsed_input.username and parsed_input.password:

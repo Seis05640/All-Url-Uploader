@@ -14,6 +14,10 @@ def make_settings(tmp_path: Path) -> Settings:
         chunk_size=1024,
         http_proxy="",
         process_max_timeout=120,
+        dashboard_enabled=False,
+        dashboard_host="127.0.0.1",
+        dashboard_port=5000,
+        dashboard_token="",
     )
 
 
