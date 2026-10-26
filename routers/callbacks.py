@@ -41,6 +41,7 @@ async def request_callback(
     settings: Settings,
     request_store: RequestStore,
     thumbnail_store: ThumbnailStore,
+    analytics_store: "AnalyticsStore | None" = None,
 ) -> None:
     try:
         await query.answer()
@@ -88,6 +89,12 @@ async def request_callback(
         safe_url_label(stored.parsed_input.source_url),
     )
 
+    job_status = "failed"
+    file_size = None
+    download_seconds = None
+    upload_seconds = None
+    error_category = None
+
     try:
         if stored.request_type == "direct_download":
             artifact = await download_direct_file(
@@ -114,6 +121,9 @@ async def request_callback(
                 work_dir=work_dir,
             )
 
+        file_size = artifact.path.stat().st_size if artifact.path.exists() else None
+        download_seconds = int((datetime.now() - started_at).total_seconds())
+
         await upload_artifact(
             bot=query.bot,
             status_message=query.message,
@@ -122,6 +132,7 @@ async def request_callback(
             thumbnail_path=thumbnail_store.get(query.from_user.id),
             started_at=started_at,
         )
+
         logger.info(
             "Completed request action | user=%s token=%s file=%s send_type=%s",
             query.from_user.id,
@@ -130,14 +141,29 @@ async def request_callback(
             artifact.send_type,
         )
     except Exception as exc:  # pylint: disable=broad-exception-caught  # pragma: no cover - user-facing safety boundary
+        error_category = type(exc).__name__
         logger.exception(
-            "Request action failed | user=%s token=%s type=%s option=%s",
+            "Request action failed | user=%s token=%s type=%s option=%s error=%s",
             query.from_user.id,
             stored.token,
             stored.request_type,
             option.option_id,
+            str(exc),
         )
-        await query.message.edit_text(f"{text.DOWNLOAD_FAILED}\n<code>{exc}</code>")
+        await query.message.edit_text(f"{text.DOWNLOAD_FAILED}\n<code>Processing failed. Please try again.</code>")
     finally:
+        if analytics_store:
+            try:
+                analytics_store.record_job_completed(
+                    stored.token,
+                    status=job_status,
+                    send_type=option.send_type,
+                    file_size=file_size,
+                    download_seconds=download_seconds,
+                    upload_seconds=None,
+                    error_category=error_category,
+                )
+            except Exception:
+                pass
         request_store.delete(stored.token)
         logger.info("Cleaned request state | token=%s", stored.token)

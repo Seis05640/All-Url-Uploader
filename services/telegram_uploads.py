@@ -9,6 +9,7 @@ from aiogram import Bot
 from aiogram.types import FSInputFile, Message
 from aiogram.utils.chat_action import ChatActionSender
 
+from services.file_splitter import needs_splitting, split_file, cleanup_chunks, get_chunk_name
 from services.media import audio_duration, video_metadata, video_note_metadata
 from services.progress import format_duration, humanbytes
 from utils import text
@@ -91,19 +92,27 @@ async def upload_artifact(
 
     file_size = artifact.path.stat().st_size if artifact.path.exists() else 0
     max_size = 2000 * 1024 * 1024  # 2GB local Telegram Bot API upload limit
+
+    # Handle large files by splitting
+    chunk_paths = None
     if file_size > max_size:
-        logger.warning(
-            "File too large for Telegram upload | file=%s size=%s max=%s",
-            artifact.file_name,
-            file_size,
-            max_size,
-        )
-        await status_message.edit_text(
-            text.FILE_TOO_LARGE.format(
-                seconds=download_seconds,
-                size=humanbytes(file_size),
+        logger.info("File exceeds 2GB limit, splitting | file=%s size=%s", artifact.file_name, file_size)
+        chunk_paths = await split_file(artifact.path, artifact.path.parent)
+        # Upload each chunk
+        total_parts = len(chunk_paths)
+        for part_num, chunk_path in enumerate(chunk_paths, 1):
+            chunk_name = get_chunk_name(artifact.file_name, part_num, total_parts)
+            chunk_input = FSInputFile(chunk_path)
+            chunk_size = chunk_path.stat().st_size
+            logger.info("Uploading chunk %d/%d | file=%s size=%s", part_num, total_parts, chunk_name, chunk_size)
+            await source_message.reply_document(
+                document=chunk_input,
+                caption=f"{artifact.caption} (part {part_num} of {total_parts})",
             )
+        await status_message.edit_text(
+            text.DONE.format(download_seconds=download_seconds, upload_seconds=0)
         )
+        cleanup_chunks(chunk_paths)
         artifact.path.unlink(missing_ok=True)
         return
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import uuid
 from pathlib import Path
@@ -18,11 +19,17 @@ class RequestStore:
     def create_token(self) -> str:
         return uuid.uuid4().hex[:10]
 
+    def _sanitize_token(self, token: str) -> str:
+        """Sanitize token to prevent path traversal."""
+        return re.sub(r'[^a-zA-Z0-9]', '', token)[:32]
+
     def _request_path(self, token: str) -> Path:
-        return self.requests_dir / f"{token}.json"
+        safe_token = self._sanitize_token(token)
+        return self.requests_dir / f"{safe_token}.json"
 
     def work_directory(self, token: str) -> Path:
-        path = self.work_root / token
+        safe_token = self._sanitize_token(token)
+        path = self.work_root / safe_token
         path.mkdir(parents=True, exist_ok=True)
         return path
 

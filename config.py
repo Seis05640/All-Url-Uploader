@@ -31,6 +31,10 @@ class Settings:
     chunk_size: int
     http_proxy: str
     process_max_timeout: int
+    dashboard_enabled: bool
+    dashboard_host: str
+    dashboard_port: int
+    dashboard_token: str
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -50,6 +54,11 @@ class Settings:
             os.environ.get("DOWNLOAD_LOCATION", "./DOWNLOADS").strip() or "./DOWNLOADS"
         )
 
+        dashboard_enabled = os.environ.get("DASHBOARD_ENABLED", "false").lower() in ("true", "1", "yes")
+        dashboard_host = os.environ.get("DASHBOARD_HOST", "127.0.0.1").strip() or "127.0.0.1"
+        dashboard_port = int(os.environ.get("DASHBOARD_PORT", "5000"))
+        dashboard_token = os.environ.get("DASHBOARD_TOKEN", "").strip()
+
         return cls(
             bot_token=bot_token,
             owner_id=owner_id,
@@ -58,6 +67,10 @@ class Settings:
             chunk_size=_parse_chunk_size(os.environ.get("CHUNK_SIZE")),
             http_proxy=os.environ.get("HTTP_PROXY", "").strip(),
             process_max_timeout=int(os.environ.get("PROCESS_MAX_TIMEOUT", "3700")),
+            dashboard_enabled=dashboard_enabled,
+            dashboard_host=dashboard_host,
+            dashboard_port=dashboard_port,
+            dashboard_token=dashboard_token,
         )
 
     @property
@@ -71,6 +84,10 @@ class Settings:
     @property
     def work_dir(self) -> Path:
         return self.download_location / "work"
+
+    @property
+    def analytics_db(self) -> Path:
+        return self.download_location / "analytics.db"
 
     def ensure_directories(self) -> None:
         for path in (

@@ -19,6 +19,8 @@ from utils import text
 from utils.keyboards import format_keyboard
 from utils.logging_config import safe_url_label
 from utils.models import StoredRequest
+from utils.security import validate_url
+from urllib.parse import urlparse
 
 router = Router(name="intake")
 logger = logging.getLogger(__name__)
@@ -30,6 +32,7 @@ async def intake_message(
     settings: Settings,
     cooldown: CooldownManager,
     request_store: RequestStore,
+    analytics_store: "AnalyticsStore | None" = None,
 ) -> None:
     raw_text = message.text or ""
     if not extract_link_text(raw_text, message.entities):
@@ -57,10 +60,29 @@ async def intake_message(
         return
 
     parsed = parse_user_input(raw_text, message.entities)
+    
+    # SSRF protection: validate URL
+    is_valid, error_msg = validate_url(parsed.source_url)
+    if not is_valid:
+        logger.warning(
+            "URL validation failed | user=%s source=%s error=%s",
+            message.from_user.id,
+            safe_url_label(parsed.source_url),
+            error_msg,
+        )
+        await message.answer(f"Invalid URL: {error_msg}")
+        return
     status_message = await message.reply(text.PROCESSING)
 
     if is_probable_youtube_url(parsed.source_url):
         token = request_store.create_token()
+        if analytics_store:
+            try:
+                from urllib.parse import urlparse
+                host = urlparse(parsed.source_url).hostname or "unknown"
+                analytics_store.record_job_created(token, message.from_user.id, host)
+            except Exception:
+                pass
         stored = StoredRequest(
             token=token,
             request_type="youtube_quick",
@@ -93,6 +115,13 @@ async def intake_message(
         info = None
 
     token = request_store.create_token()
+    if analytics_store:
+        try:
+            from urllib.parse import urlparse
+            host = urlparse(parsed.source_url).hostname or "unknown"
+            analytics_store.record_job_created(token, message.from_user.id, host)
+        except Exception:
+            pass
     if info:
         options = build_ytdlp_options(info)
         request_type = "ytdlp_selection"
